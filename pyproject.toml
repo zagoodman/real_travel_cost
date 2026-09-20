@@ -38,3 +38,7 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The default run stays offline; the agreement check against the live World Bank series is
+# opt-in via `uv run pytest -m network`.
+addopts = "-m 'not network'"
+markers = ["network: hits live upstream APIs"]

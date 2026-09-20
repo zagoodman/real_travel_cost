@@ -6,9 +6,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from .countries import attach_country_codes
+from .countries import attach_country_codes, canonicalize_names
 from .metrics import build_panel
-from .sources import fetch_cpi, fetch_exchange_rates, fetch_travel_advisories, load_ppp
+from .sources import (
+    PLI_GDP,
+    fetch_cpi,
+    fetch_exchange_rates,
+    fetch_price_level_index,
+    fetch_travel_advisories,
+)
 
 DEFAULT_CACHE = Path("~/.cache/real_travel_cost").expanduser()
 CACHE_FILENAME = "panel.parquet"
@@ -17,7 +23,7 @@ CACHE_FILENAME = "panel.parquet"
 def load_panel(
     refresh: bool = False,
     cache_dir: Path | str | None = DEFAULT_CACHE,
-    ppp_year: int = 2020,
+    indicator: str = PLI_GDP,
 ) -> pd.DataFrame:
     """Return the country-month panel, refetching only when asked or uncached.
 
@@ -27,12 +33,12 @@ def load_panel(
     if cache_path and cache_path.exists() and not refresh:
         return pd.read_parquet(cache_path)
 
-    ppp = load_ppp(ppp_year)
+    price_level = canonicalize_names(fetch_price_level_index(indicator))
     panel = build_panel(
         cpi=fetch_cpi(),
         exchange_rates=fetch_exchange_rates(),
-        ppp=ppp,
-        advisories=attach_country_codes(fetch_travel_advisories(), ppp),
+        price_level=price_level,
+        advisories=attach_country_codes(fetch_travel_advisories(), price_level),
     )
 
     if cache_path:

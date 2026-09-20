@@ -1,10 +1,9 @@
-"""Fetchers for the three upstream datasets. All public, no API keys."""
+"""Fetchers for the upstream datasets. All public, no API keys."""
 
 from __future__ import annotations
 
 import html
 import re
-from importlib import resources
 
 import pandas as pd
 import requests
@@ -14,6 +13,17 @@ SDMX_AGENCY = "IMF.STA"
 SDMX_DATA_HEADERS = {"Accept": "application/vnd.sdmx.structurespecificdata+xml;version=2.1"}
 
 STATE_DEPT_URL = "https://travel.state.gov/_res/rss/TAsTWs.xml"
+
+WORLD_BANK_BASE = "https://api.worldbank.org/v2"
+
+# Price level index: PPP conversion factor over market exchange rate, US = 100. The GDP
+# basket is the series the README cites; the household one is closer to what a traveler
+# buys but covers ~20 fewer countries.
+PLI_GDP = "PA.NUS.GDP.PLI"
+PLI_HOUSEHOLD = "PA.NUS.PRVT.PLI"
+
+# The World Bank quotes Kosovo as XKX; IMF data and the advisory table use KSV.
+WORLD_BANK_CODE_FIXES = {"XKX": "KSV"}
 
 # travel.state.gov sits behind Cloudflare, which rejects the default requests user agent.
 BROWSER_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
@@ -67,14 +77,26 @@ def fetch_exchange_rates(start_period: int = 2000, timeout: int = DEFAULT_TIMEOU
     return _fetch_sdmx(ER_FLOW, ".XDC_USD.EOP_RT.M", start_period, timeout)
 
 
+def _clean_title(title: str) -> str:
+    """Unescape entities and normalize the feed's stray Unicode spaces to plain ones."""
+    # Titles carry non-breaking and narrow no-break spaces plus curly apostrophes, all of
+    # which defeat exact name matching.
+    text = html.unescape(title)
+    for space in ("\u00a0", "\u202f", "\u2009"):
+        text = text.replace(space, " ")
+    return text.replace("\u2019", "'").strip()
+
+
 def fetch_travel_advisories(timeout: int = DEFAULT_TIMEOUT) -> pd.DataFrame:
     """State Dept. advisory level 1-4, parsed out of the RSS item titles."""
     response = requests.get(STATE_DEPT_URL, headers=BROWSER_HEADERS, timeout=timeout)
     response.raise_for_status()
+    # The feed serves UTF-8 but declares ISO-8859-1, which turns "Curaçao" into mojibake.
+    response.encoding = "utf-8"
 
     rows = []
     for title in re.findall(r"<title>(.*?)</title>", response.text, re.S):
-        match = ADVISORY_TITLE.match(html.unescape(title).strip())
+        match = ADVISORY_TITLE.match(_clean_title(title))
         if match:
             rows.append((match.group("country"), int(match.group("level"))))
 
@@ -85,10 +107,33 @@ def fetch_travel_advisories(timeout: int = DEFAULT_TIMEOUT) -> pd.DataFrame:
     return advisories.drop_duplicates("country_name", keep="first").reset_index(drop=True)
 
 
-def load_ppp(year: int = 2020) -> pd.DataFrame:
-    """World Bank PPP conversion factor (local currency per international dollar)."""
-    path = resources.files("real_travel_cost.data") / f"ppp{year}.csv"
-    ppp = pd.read_csv(path, encoding="utf-8-sig")
-    ppp = ppp.rename(columns={f"ppp_{year}": "ppp"})
-    ppp["ppp"] = ppp.ppp.astype(float)
-    return ppp[["country_code", "country_name", "ppp"]]
+def fetch_price_level_index(
+    indicator: str = PLI_GDP, timeout: int = DEFAULT_TIMEOUT
+) -> pd.DataFrame:
+    """Annual World Bank price level index by country, US = 100 in every year.
+
+    This is the published version of what this repo nowcasts: it already divides the PPP
+    conversion factor by the market exchange rate, so it needs no unit handling and is
+    rebased by the World Bank whenever a currency is redenominated.
+    """
+    url = f"{WORLD_BANK_BASE}/country/all/indicator/{indicator}"
+    response = requests.get(url, params={"format": "json", "per_page": 25000}, timeout=timeout)
+    response.raise_for_status()
+    payload = response.json()
+
+    # The first element is pagination metadata; a single page holds the whole series.
+    meta, rows = payload[0], payload[1]
+    if meta["pages"] > 1:  # guard against the series outgrowing one request
+        raise RuntimeError(f"{indicator} returned {meta['pages']} pages; raise per_page")
+
+    frame = pd.DataFrame(
+        [
+            (row["countryiso3code"], row["country"]["value"], row["date"], row["value"])
+            for row in rows
+            if row["value"] is not None and row["countryiso3code"]
+        ],
+        columns=["country_code", "country_name", "year", "price_level_index"],
+    )
+    frame["country_code"] = frame.country_code.replace(WORLD_BANK_CODE_FIXES)
+    frame["year"] = frame.year.astype(int)
+    return frame.sort_values(["country_code", "year"]).reset_index(drop=True)

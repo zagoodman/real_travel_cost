@@ -52,12 +52,14 @@ def plot_series(
 def plot_devaluation_vs_real_cost(
     panel: pd.DataFrame,
     country_code: str = "TUR",
-    country_label: str = "Turkiye",
+    country_label: str | None = None,
     start: str = "2015-01-01",
 ) -> plt.Figure:
     """The README figure: a collapsing currency above, the far smaller real gain below."""
     since = pd.Timestamp(start)
     local = panel[(panel.country_code == country_code) & (panel.date >= since)].set_index("date")
+    if country_label is None:  # the panel already carries the canonical spelling
+        country_label = local.country_name.iloc[0]
 
     rate = local.exr / local.exr.iloc[0]
     cost = local.current_dollars
@@ -102,7 +104,8 @@ def plot_devaluation_vs_real_cost(
     fig.text(
         0.5,
         0.04,
-        f"Sources: IMF CPI and exchange rates, World Bank PPP. Through {panel.date.max():%B %Y}.",
+        f"Sources: World Bank price level index, IMF CPI and exchange rates. "
+        f"Through {panel.date.max():%B %Y}.",
         ha="center",
         fontsize=9,
         color="#666666",
