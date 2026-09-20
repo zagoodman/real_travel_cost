@@ -1,0 +1,9 @@
+# D1 binding for the dashboard Worker and for `wrangler d1` from the repo root.
+# The database_id is filled in by `wrangler d1 create real-travel-cost`.
+name = "real-travel-cost"
+compatibility_date = "2026-09-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "real-travel-cost"
+database_id = "TODO-run-wrangler-d1-create"

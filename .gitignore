@@ -5,3 +5,10 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.parquet
+
+# Local D1 replica and generated SQL
+.wrangler/
+db/local.sqlite
+db/seed_advisory_observations.sql
+db/remote-dump.sql
+db/publish.sql
